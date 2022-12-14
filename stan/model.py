@@ -58,7 +58,7 @@ class Model:
         if self.model_name != httpstan.models.calculate_model_name(self.program_code):
             raise ValueError("`model_name` does not match `program_code`.")
 
-    def sample(self, *, num_chains=4, **kwargs) -> stan.fit.Fit:
+    def sample(self, *, num_chains=4, verbosity=2, **kwargs) -> stan.fit.Fit:
         """Draw samples from the model.
 
         Parameters in ``kwargs`` will be passed to the default sample function.
@@ -67,9 +67,15 @@ class Model:
         identical to those used in CmdStan.  See the CmdStan documentation for
         parameter descriptions and default values.
 
-        There is one exception:  `num_chains`. `num_chains` is a
+        There are two exceptions:  `num_chains`. `num_chains` is a
         PyStan-specific keyword argument. It indicates the number of
         independent processes to use when drawing samples.
+
+        `verbosity` : int
+            Control level of verbosity in stan stdout
+            verbosity = 0: No stan messages
+            verbosity = 1: Display each unique message once
+            verbosity > 1: Display all messages
 
 
         Returns:
@@ -86,6 +92,7 @@ class Model:
             >>> fit = posterior.sample(num_chains=2, init=[{"y": 3}, {"y": 3}])
 
         """
+        kwargs['verbosity'] = verbosity
         return self.hmc_nuts_diag_e_adapt(num_chains=num_chains, **kwargs)
 
     def hmc_nuts_diag_e_adapt(self, *, num_chains=4, **kwargs) -> stan.fit.Fit:
@@ -126,7 +133,7 @@ class Model:
         function = "stan::services::sample::fixed_param"
         return self._create_fit(function=function, num_chains=num_chains, **kwargs)
 
-    def _create_fit(self, *, function, num_chains, **kwargs) -> stan.fit.Fit:
+    def _create_fit(self, *, function, num_chains, verbosity, **kwargs) -> stan.fit.Fit:
         """Make a request to httpstan's ``create_fit`` endpoint and process results.
 
         Users should not use this function.
@@ -287,10 +294,27 @@ class Model:
 
             if nonstandard_logger_messages:
                 io.error_line("<comment>Messages received during sampling:</comment>")
-                for msg in nonstandard_logger_messages:
-                    text = msg["values"][0].replace("info:", "  ").replace("error:", "  ")
-                    if text.strip():
-                        io.error_line(f"{text}")
+
+                if verbosity==0:
+                    pass
+                elif verbosity==1:
+                    msg_types = ['Informational Message', 'Exception']
+                    msg_counts = [0, 0]
+                    for msg in nonstandard_logger_messages:
+                        text = msg["values"][0].replace("info:", "  ").replace("error:", "  ")
+                        if text.strip():
+                            for kk,mtype in enumerate(msg_types):
+                                if text.strip().startswith(mtype):
+                                    msg_counts[kk] += 1
+                    for kk,mtype in enumerate(msg_types):
+                        num_type = msg_counts[kk]
+                        io.error_line(f"  Received {num_type} {mtype}")
+                elif verbosity>1:
+                    for msg in nonstandard_logger_messages:
+                        text = msg["values"][0].replace("info:", "  ").replace("error:", "  ")
+                        if text.strip():
+                            io.error_line(f"{text}")
+
 
             fit = stan.fit.Fit(
                 stan_outputs,
